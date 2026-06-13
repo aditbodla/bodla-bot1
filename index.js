@@ -1,5 +1,3 @@
-
-
 require("dotenv").config();
 const path = require("path");
 const express = require("express");
@@ -31,8 +29,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // ─── FETCH LIVE DATA FROM DATABASE ────────────────────────────────────
 async function getLiveContext() {
   try {
-    const ratesRes = await db.supabase.from('plot_rates_v2').select('*').limit(100);
-    console.log("🔍 Fetched", ratesRes.data?.length || 0, "plot rates");
     const [projectsRes, ratesRes, companyRes] = await Promise.all([
       db.supabase.from('projects').select('*'),
       db.supabase.from('plot_rates_v2').select('*').limit(100),
@@ -42,6 +38,8 @@ async function getLiveContext() {
     const projects = projectsRes.data || [];
     const rates = ratesRes.data || [];
     const company = companyRes.data || null;
+
+    console.log("🔍 Fetched", projects.length, "projects,", rates.length, "plot rates");
 
     let context = `\n\n=== LIVE COMPANY DATA (Updated) ===\n`;
 
@@ -97,16 +95,9 @@ async function getLiveContext() {
 // ─── BUILD INTELLIGENT SYSTEM PROMPT ──────────────────────────────────
 async function buildSystemPrompt() {
   const liveContext = await getLiveContext();
-try {
-    const liveContext = await getLiveContext();
-    console.log("📊 Live context length:", liveContext.length);
-    console.log("📊 Context preview:", liveContext.substring(0, 200));
-    
-    return `You are an intelligent...` + liveContext + `...`;
-  } catch (err) {
-    console.error("❌ Error building prompt:", err.message);
-    return `You are an intelligent...`; // fallback
-  }
+  console.log("📊 Live context length:", liveContext.length);
+  console.log("📊 Context preview:", liveContext.substring(0, 200));
+
   return `You are an intelligent, friendly sales assistant for Bodla Group — a leading real estate company in DHA Multan, Pakistan.
 
 YOUR CORE ROLE:
