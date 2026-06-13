@@ -93,10 +93,22 @@ async function getLiveContext() {
 }
 
 // ─── BUILD INTELLIGENT SYSTEM PROMPT ──────────────────────────────────
-async function buildSystemPrompt() {
+async function buildSystemPrompt(client = {}) {
   const liveContext = await getLiveContext();
   console.log("📊 Live context length:", liveContext.length);
   console.log("📊 Context preview:", liveContext.substring(0, 200));
+
+  // Tell the AI the current handoff state so it behaves naturally.
+  let handoffNote = "";
+  if (client.escalated) {
+    handoffNote = `
+
+⚠️ HANDOFF STATUS: This client has ALREADY been handed off to the human sales team.
+- Keep helping them naturally: answer any questions about projects, plots, rates, locations, investment.
+- A human agent will contact them separately — you may gently reassure them of this if relevant, but do NOT make them feel ignored or stuck.
+- Do NOT write [ESCALATE] again for the same buying intent. Only write [ESCALATE] if the client raises a clearly NEW request that needs a human (e.g. a different property/deal, a scheduling change, or an explicit "transfer me again").
+- Never repeat a robotic "team will contact you" line on every message. Continue the conversation like a knowledgeable assistant.`;
+  }
 
   return `You are an intelligent, friendly sales assistant for Bodla Group — a leading real estate company in DHA Multan, Pakistan.
 
@@ -144,6 +156,7 @@ YOUR STYLE:
 - Be honest about data ("I'll check that for you")
 
 ${liveContext}
+${handoffNote}
 
 Remember: You have LIVE company data above. Use it to answer accurately. If client asks about something not in the data, acknowledge it professionally.`;
 }
@@ -232,26 +245,17 @@ console.log("🔔 WEBHOOK RECEIVED:", req.body.From, req.body.Body);
     // 2. Save incoming message
     await db.saveMessage(clientPhone, "user", incomingMsg);
 
-    // 3. If escalated with no agent, send holding reply
-if (client.escalated && !client.assigned_to) {
-      const holdingReplies = [
-        "Jazakallah for your patience! Hamara sales team aap se jald contact karega. Agar koi aur sawaal hai to poochein! 😊",
-        "Shukriya! Hamara team aap ki request dekh raha hai aur jald hi rabta karega. Thoda intezaar farmayein! 🙏",
-        "Aapki request hamare team tak pohanch gayi. Agent jald hi contact karega. Jazakallah! ✨",
-      ];
-      const reply = holdingReplies[Math.floor(Math.random() * holdingReplies.length)];
-      await db.saveMessage(clientPhone, "assistant", reply);
-      twiml.message(reply);
-      res.type("text/xml");
-      return res.send(twiml.toString());
-    }
+    // NOTE: We intentionally do NOT short-circuit escalated clients with a
+    // canned holding reply. This is an AI chatbot — it should keep answering
+    // naturally even after handoff. The system prompt is told about the
+    // handoff state so it won't re-escalate the same intent.
 
     // 4. Load chat history
     const history = await db.getChatHistory(clientPhone);
 
-    // 5. Build messages for OpenAI
+    // 5. Build messages for OpenAI (system prompt is handoff-aware)
     const messages = [
-      { role: "system", content: await buildSystemPrompt() },
+      { role: "system", content: await buildSystemPrompt(client) },
       ...history.map((m) => ({ 
         role: m.role === "agent" ? "assistant" : m.role, 
         content: m.content
@@ -275,17 +279,19 @@ if (client.escalated && !client.assigned_to) {
     // 7. Save bot reply
     await db.saveMessage(clientPhone, "assistant", botReply);
 
-    // 8. If escalate, notify agent
-    if (escalate) {
+    // 8. If escalate AND not already escalated, notify agent once
+    if (escalate && !client.escalated) {
       try {
         const fullHistory = await db.getChatHistory(clientPhone);
         await notifyAgent(clientPhone, client.name, fullHistory);
         await db.markEscalated(clientPhone, true);
-        console.log("✅ Agent notified:", clientPhone);
+        console.log("✅ Agent notified (first time):", clientPhone);
       } catch (agentErr) {
         console.error("Agent notification failed:", agentErr.message);
         await db.markEscalated(clientPhone, true);
       }
+    } else if (escalate && client.escalated) {
+      console.log("ℹ️ Already escalated — AI handled NEW intent, agent not re-notified:", clientPhone);
     }
 
     // 9. Reply to client
