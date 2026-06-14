@@ -243,8 +243,17 @@ export default function AdminApp() {
       );
       setReplyText("");
       setMsg("✓ Message sent!");
-      await loadClients();
-      selectClient(clients.find((c) => c.phone === selectedClient.phone));
+      // Re-fetch clients and refresh the open chat from the FRESH data
+      // (avoids a race where clients state isn't updated yet).
+      const { data: fresh } = await axios.get(`${API}/api/clients`, {
+        headers: getHeaders(),
+      });
+      setClients(fresh || []);
+      const updated = (fresh || []).find((c) => c.phone === selectedClient.phone);
+      if (updated) {
+        setSelectedClient(updated);
+        setChatMessages(updated.messages || []);
+      }
     } catch (e) {
       setMsg("Error: " + e.response?.data?.error || e.message);
     }
@@ -808,7 +817,19 @@ export default function AdminApp() {
         ) : (
           chatMessages.map((m, i) => {
             const time = new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-            const sender = m.role === 'user' ? 'Client' : m.role === 'agent' ? 'Agent' : 'Bot';
+            // Staff messages (agent/admin/manager reply) carry sender info.
+            let sender;
+            if (m.role === 'user') {
+              sender = 'Client';
+            } else if (m.role === 'agent') {
+              // Show "Name (Role)" when we recorded who sent it, else just "Agent".
+              const roleLabel = m.sender_role
+                ? m.sender_role.charAt(0).toUpperCase() + m.sender_role.slice(1)
+                : 'Agent';
+              sender = m.sender_name ? `${m.sender_name} (${roleLabel})` : roleLabel;
+            } else {
+              sender = 'Bot';
+            }
             const senderColor = m.role === 'user' ? '#999' : m.role === 'agent' ? '#1d4ed8' : '#666';
             
             return (

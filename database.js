@@ -53,8 +53,14 @@ async function getAllClients() {
   return data || [];
 }
 
-async function saveMessage(phone, role, content) {
-  await supabase.from("messages").insert({ phone, role, content });
+async function saveMessage(phone, role, content, sender = null) {
+  const row = { phone, role, content };
+  if (sender) {
+    row.sender_id = sender.id || null;
+    row.sender_name = sender.full_name || sender.name || null;
+    row.sender_role = sender.role || null;
+  }
+  await supabase.from("messages").insert(row);
   await supabase
     .from("clients")
     .update({ last_seen: new Date().toISOString() })
@@ -64,7 +70,7 @@ async function saveMessage(phone, role, content) {
 async function getChatHistory(phone) {
   const { data } = await supabase
     .from("messages")
-    .select("role, content, created_at")
+    .select("role, content, created_at, sender_name, sender_role")
     .eq("phone", phone)
     .order("created_at", { ascending: true });
   return data || [];

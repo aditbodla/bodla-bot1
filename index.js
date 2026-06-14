@@ -468,7 +468,11 @@ app.post("/api/agent/reply", auth.requireAuth(["admin", "manager", "agent"]), as
       body: message,
     });
 
-    await db.saveMessage(phone, "agent", message);
+    await db.saveMessage(phone, "agent", message, {
+      id: req.user.id,
+      full_name: req.user.full_name,
+      role: req.user.role,
+    });
     res.json({ success: true, sid: result.sid });
   } catch (err) {
     console.error("Agent reply error:", err.message);
