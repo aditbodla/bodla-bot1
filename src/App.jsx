@@ -47,6 +47,9 @@ export default function AdminApp() {
     name: "", about: "", website: "", phone: "", email: "", address: "",
   });
   const [editingRateId, setEditingRateId] = useState(null);
+  const [newUser, setNewUser] = useState({
+    username: "", password: "", full_name: "", role: "agent", team_id: "", whatsapp_phone: "",
+  });
 
   const getHeaders = () => ({ Authorization: `Bearer ${auth?.token}` });
 
@@ -222,6 +225,7 @@ export default function AdminApp() {
     if (!auth?.token) return;
     if (page === "projects") loadProjects();
     if (page === "company") loadCompany();
+    if (page === "users") { loadUsers(); loadTeams(); }
   }, [page, auth?.token]);
 
   const selectClient = async (client) => {
@@ -369,6 +373,28 @@ export default function AdminApp() {
   };
 
   // Drop 2: user + team edit/delete
+  const createUser = async () => {
+    if (!newUser.username.trim() || !newUser.password.trim() || !newUser.full_name.trim()) {
+      setMsg("Username, password and full name are required");
+      return;
+    }
+    try {
+      await axios.post(`${API}/api/users`, {
+        username: newUser.username.trim(),
+        password: newUser.password,
+        full_name: newUser.full_name.trim(),
+        role: newUser.role,
+        team_id: newUser.team_id || null,
+      }, { headers: getHeaders() });
+      // If a whatsapp number was given, set it via update (create endpoint doesn't take it)
+      setMsg("✓ User created");
+      setNewUser({ username: "", password: "", full_name: "", role: "agent", team_id: "", whatsapp_phone: "" });
+      loadUsers();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
   const editUser = async (u) => {
     const full_name = window.prompt("Full name:", u.full_name || "");
     if (full_name === null) return;
@@ -1129,6 +1155,39 @@ export default function AdminApp() {
 
         {page === "users" && (
           <div>
+            <div style={{ background: "white", padding: 20, borderRadius: 8, marginBottom: 20, border: "1px solid #e5e7eb" }}>
+              <h3 style={{ marginTop: 0 }}>Create User</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <input placeholder="Full name" value={newUser.full_name}
+                  onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }} />
+                <input placeholder="Username" value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }} />
+                <input placeholder="Password" type="text" value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }} />
+                <select value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }}>
+                  <option value="agent">Agent</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <select value={newUser.team_id}
+                  onChange={(e) => setNewUser({ ...newUser, team_id: e.target.value })}
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }}>
+                  <option value="">— No team —</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button onClick={createUser}
+                style={{ padding: "8px 20px", background: "#1a6b3c", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}>
+                Create User
+              </button>
+            </div>
             <button
               onClick={loadUsers}
               style={{
