@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "render-build": "npm install && vite build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0",

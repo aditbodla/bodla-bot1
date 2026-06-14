@@ -306,10 +306,7 @@ console.log("🔔 WEBHOOK RECEIVED:", req.body.From, req.body.Body);
   }
 });
 
-// ─── DASHBOARD ────────────────────────────────────────────────────────
-app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(__dirname, "dashboard.html"));
-});
+// ─── DASHBOARD (React SPA is served as static files at the bottom) ─────
 
 app.get("/api/clients", async (req, res) => {
   try {
@@ -327,7 +324,7 @@ app.get("/api/clients", async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => res.send("Bodla Bot running."));
+app.get("/health", (req, res) => res.send("Bodla Bot running."));
 
 // ─── AUTH & ADMIN ─────────────────────────────────────────────────────
 const auth = require("./auth");
@@ -515,6 +512,19 @@ app.post("/api/company-profile", auth.requireAuth(["admin"]), async (req, res) =
     res.status(400).json({ error: err.message });
   }
 });
+
+// ─── SERVE REACT ADMIN/AGENT PANEL (built by `vite build` → dist/) ─────
+const DIST_DIR = path.join(__dirname, "dist");
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR));
+  // SPA fallback: any non-API, non-webhook GET returns index.html
+  app.get(/^\/(?!api|webhook|health).*/, (req, res) => {
+    res.sendFile(path.join(DIST_DIR, "index.html"));
+  });
+  console.log("🖥️  Serving React panel from /dist");
+} else {
+  console.log("⚠️  No /dist folder — run `npm run build` before deploy to serve the panel");
+}
 
 // ─── START SERVER ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 10000;

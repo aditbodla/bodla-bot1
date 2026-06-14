@@ -2,7 +2,10 @@ import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import axios from "axios";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:10000";
+// In production (panel served by Render alongside the API) we use same-origin
+// relative paths, so API = "". For local `npm run dev`, set VITE_API_URL to the
+// Render backend URL in your .env.
+const API = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "http://localhost:10000");
 
 export default function AdminApp() {
   const [auth, setAuth] = useState(null);
