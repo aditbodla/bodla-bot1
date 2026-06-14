@@ -450,14 +450,29 @@ app.get("/api/plot-rates-v2", auth.requireAuth(), async (req, res) => {
 
 app.post("/api/plot-rates-v2", auth.requireAuth(["admin", "manager"]), async (req, res) => {
   try {
-    const { sector, plot_type, size, plot_no_from, plot_no_to, min_price, max_price, features, notes } = req.body;
-    const { data, error } = await db.supabase
-      .from("plot_rates_v2")
-      .insert({ sector, plot_type, size, plot_no_from, plot_no_to, min_price, max_price, features: features||{}, notes, updated_by: req.user.id })
-      .select()
-      .single();
+    const { id, sector, plot_type, size, plot_no_from, plot_no_to, min_price, max_price, features, notes } = req.body;
+    const payload = { sector, plot_type, size, plot_no_from, plot_no_to, min_price, max_price, features: features||{}, notes, updated_by: req.user.id, updated_at: new Date().toISOString() };
+
+    let result;
+    if (id) {
+      // Edit existing row
+      result = await db.supabase.from("plot_rates_v2").update(payload).eq("id", id).select().single();
+    } else {
+      // New row
+      result = await db.supabase.from("plot_rates_v2").insert(payload).select().single();
+    }
+    if (result.error) throw new Error(result.error.message);
+    res.json(result.data);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/plot-rates-v2/:id", auth.requireAuth(["admin", "manager"]), async (req, res) => {
+  try {
+    const { error } = await db.supabase.from("plot_rates_v2").delete().eq("id", req.params.id);
     if (error) throw new Error(error.message);
-    res.json(data);
+    res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

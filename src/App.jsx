@@ -40,6 +40,14 @@ export default function AdminApp() {
   const [newLeadForm, setNewLeadForm] = useState({ name: "", phone: "" });
   const [excelData, setExcelData] = useState([]);
 
+  // Drop 1: Projects + Company + edit-rate state
+  const [projects, setProjects] = useState([]);
+  const [newProject, setNewProject] = useState("");
+  const [company, setCompany] = useState({
+    name: "", about: "", website: "", phone: "", email: "", address: "",
+  });
+  const [editingRateId, setEditingRateId] = useState(null);
+
   const getHeaders = () => ({ Authorization: `Bearer ${auth?.token}` });
 
   // Restore auth on app load
@@ -156,6 +164,66 @@ export default function AdminApp() {
     }
   };
 
+  const loadProjects = async () => {
+    try {
+      const { data } = await axios.get(`${API}/api/projects`, {
+        headers: getHeaders(),
+      });
+      setProjects(data || []);
+    } catch (e) {
+      console.error("loadProjects error:", e.message);
+    }
+  };
+
+  const addProject = async () => {
+    if (!newProject.trim()) return;
+    try {
+      await axios.post(`${API}/api/projects`, { name: newProject.trim() }, {
+        headers: getHeaders(),
+      });
+      setNewProject("");
+      setMsg("Project added");
+      loadProjects();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
+  const loadCompany = async () => {
+    try {
+      const { data } = await axios.get(`${API}/api/company-profile`, {
+        headers: getHeaders(),
+      });
+      if (data) {
+        setCompany({
+          name: data.name || "", about: data.about || "",
+          website: data.website || "", phone: data.phone || "",
+          email: data.email || "", address: data.address || "",
+        });
+      }
+    } catch (e) {
+      console.error("loadCompany error:", e.message);
+    }
+  };
+
+  const saveCompany = async () => {
+    try {
+      await axios.post(`${API}/api/company-profile`, company, {
+        headers: getHeaders(),
+      });
+      setMsg("Company info saved");
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
+  // Load page-specific data when navigating
+  useEffect(() => {
+    if (!auth?.token) return;
+    if (page === "projects") loadProjects();
+    if (page === "company") loadCompany();
+  }, [page, auth?.token]);
+
   const selectClient = async (client) => {
     setSelectedClient(client);
     setChatMessages(client.messages || []);
@@ -227,6 +295,7 @@ export default function AdminApp() {
       await axios.post(
         `${API}/api/plot-rates-v2`,
         {
+          id: editingRateId || undefined,
           sector: rateForm.sector,
           plot_type: rateForm.type,
           size: rateForm.size,
@@ -239,7 +308,8 @@ export default function AdminApp() {
         },
         { headers: getHeaders() },
       );
-      setMsg("✓ Saved!");
+      setMsg(editingRateId ? "✓ Updated!" : "✓ Saved!");
+      setEditingRateId(null);
       setRateForm({
         sector: "",
         type: "residential",
@@ -253,6 +323,39 @@ export default function AdminApp() {
       loadRates();
     } catch (e) {
       setMsg("Error: " + e.response?.data?.error || e.message);
+    }
+  };
+
+  const editRate = (r) => {
+    setEditingRateId(r.id);
+    setRateForm({
+      sector: r.sector || "",
+      type: r.plot_type || "residential",
+      size: r.size || "",
+      from: r.plot_no_from ?? "",
+      to: r.plot_no_to ?? "",
+      min: r.min_price ? r.min_price / 100000 : "",
+      max: r.max_price ? r.max_price / 100000 : "",
+      notes: r.notes || "",
+    });
+    setMsg("Editing rate — update the form and Save");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelEditRate = () => {
+    setEditingRateId(null);
+    setRateForm({ sector: "", type: "residential", size: "", from: "", to: "", min: "", max: "", notes: "" });
+    setMsg("");
+  };
+
+  const deleteRate = async (id) => {
+    if (!window.confirm("Delete this plot rate?")) return;
+    try {
+      await axios.delete(`${API}/api/plot-rates-v2/${id}`, { headers: getHeaders() });
+      setMsg("Rate deleted");
+      loadRates();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
     }
   };
 
@@ -432,6 +535,8 @@ export default function AdminApp() {
           { id: "users", label: "Users" },
           { id: "teams", label: "Teams" },
           { id: "rates", label: "Plot Rates" },
+          { id: "projects", label: "Projects" },
+          { id: "company", label: "Company Info" },
         ].map((item) => (
           <div
             key={item.id}
@@ -1369,8 +1474,24 @@ export default function AdminApp() {
                   marginRight: 10,
                 }}
               >
-                Save Rate
+                {editingRateId ? "Update Rate" : "Save Rate"}
               </button>
+              {editingRateId && (
+                <button
+                  onClick={cancelEditRate}
+                  style={{
+                    background: "#6b7280",
+                    color: "white",
+                    padding: 8,
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    marginRight: 10,
+                  }}
+                >
+                  Cancel Edit
+                </button>
+              )}
               <button
                 onClick={downloadTemplate}
                 style={{
@@ -1526,11 +1647,21 @@ export default function AdminApp() {
                     >
                       Max
                     </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rates.slice(0, 10).map((r, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  {rates.map((r, i) => (
+                    <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb" }}>
                       <td style={{ padding: 12 }}>Sector {r.sector}</td>
                       <td style={{ padding: 12 }}>{r.plot_type}</td>
                       <td style={{ padding: 12 }}>{r.size}</td>
@@ -1552,10 +1683,104 @@ export default function AdminApp() {
                       >
                         Rs {r.max_price / 100000}L
                       </td>
+                      <td style={{ padding: 12 }}>
+                        <button
+                          onClick={() => editRate(r)}
+                          style={{
+                            marginRight: 6, padding: "4px 10px", fontSize: 12,
+                            background: "#2563eb", color: "white", border: "none",
+                            borderRadius: 4, cursor: "pointer",
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteRate(r.id)}
+                          style={{
+                            padding: "4px 10px", fontSize: 12,
+                            background: "#dc2626", color: "white", border: "none",
+                            borderRadius: 4, cursor: "pointer",
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {page === "projects" && (
+          <div>
+            <h1 style={{ fontSize: 24, marginBottom: 20 }}>Projects</h1>
+            <div style={{ display: "flex", gap: 8, marginBottom: 20, maxWidth: 500 }}>
+              <input
+                value={newProject}
+                onChange={(e) => setNewProject(e.target.value)}
+                placeholder="New project name"
+                style={{ flex: 1, padding: 10, border: "1px solid #d1d5db", borderRadius: 4 }}
+              />
+              <button
+                onClick={addProject}
+                style={{ padding: "10px 20px", background: "#1a6b3c", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+              >
+                Add
+              </button>
+            </div>
+            <div style={{ background: "white", borderRadius: 8, padding: 16, maxWidth: 600 }}>
+              {projects.length === 0 ? (
+                <p style={{ color: "#6b7280" }}>No projects yet.</p>
+              ) : (
+                projects.map((p) => (
+                  <div key={p.id} style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>
+                    {p.name}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {page === "company" && (
+          <div style={{ maxWidth: 600 }}>
+            <h1 style={{ fontSize: 24, marginBottom: 20 }}>Company Info</h1>
+            <div style={{ background: "white", borderRadius: 8, padding: 20 }}>
+              {[
+                { key: "name", label: "Company Name" },
+                { key: "website", label: "Website" },
+                { key: "phone", label: "Phone" },
+                { key: "email", label: "Email" },
+                { key: "address", label: "Address" },
+              ].map((f) => (
+                <div key={f.key} style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{f.label}</label>
+                  <input
+                    value={company[f.key]}
+                    onChange={(e) => setCompany({ ...company, [f.key]: e.target.value })}
+                    style={{ width: "100%", padding: 10, border: "1px solid #d1d5db", borderRadius: 4 }}
+                  />
+                </div>
+              ))}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                  About / Knowledge (the bot uses this)
+                </label>
+                <textarea
+                  value={company.about}
+                  onChange={(e) => setCompany({ ...company, about: e.target.value })}
+                  rows={6}
+                  style={{ width: "100%", padding: 10, border: "1px solid #d1d5db", borderRadius: 4, fontFamily: "inherit" }}
+                />
+              </div>
+              <button
+                onClick={saveCompany}
+                style={{ padding: "10px 24px", background: "#1a6b3c", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+              >
+                Save Company Info
+              </button>
             </div>
           </div>
         )}
