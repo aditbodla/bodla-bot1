@@ -359,6 +359,57 @@ export default function AdminApp() {
     }
   };
 
+  // Drop 2: user + team edit/delete
+  const editUser = async (u) => {
+    const full_name = window.prompt("Full name:", u.full_name || "");
+    if (full_name === null) return;
+    const role = window.prompt("Role (admin/manager/agent):", u.role || "agent");
+    if (role === null) return;
+    const whatsapp_phone = window.prompt("WhatsApp phone (e.g. +9230...):", u.whatsapp_phone || "");
+    if (whatsapp_phone === null) return;
+    try {
+      await axios.put(`${API}/api/users/${u.id}`, { full_name, role, whatsapp_phone }, { headers: getHeaders() });
+      setMsg("User updated");
+      loadUsers();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
+  const deleteUser = async (u) => {
+    if (!window.confirm(`Delete ${u.full_name}? Their leads go back to the pool.`)) return;
+    try {
+      await axios.delete(`${API}/api/users/${u.id}`, { headers: getHeaders() });
+      setMsg("User deleted, leads unassigned");
+      loadUsers();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
+  const editTeam = async (t) => {
+    const name = window.prompt("Team name:", t.name || "");
+    if (name === null) return;
+    try {
+      await axios.put(`${API}/api/teams/${t.id}`, { name }, { headers: getHeaders() });
+      setMsg("Team updated");
+      loadTeams();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
+  const deleteTeam = async (t) => {
+    if (!window.confirm(`Delete team "${t.name}"? Members and clients will be detached.`)) return;
+    try {
+      await axios.delete(`${API}/api/teams/${t.id}`, { headers: getHeaders() });
+      setMsg("Team deleted");
+      loadTeams();
+    } catch (e) {
+      setMsg("Error: " + (e.response?.data?.error || e.message));
+    }
+  };
+
   const handleExcelFile = async (file) => {
     try {
       const data = await file.arrayBuffer();
@@ -1126,6 +1177,16 @@ export default function AdminApp() {
                   >
                     Status
                   </th>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1166,6 +1227,28 @@ export default function AdminApp() {
                     </td>
                     <td style={{ padding: 12 }}>
                       {u.is_active ? "Active" : "Inactive"}
+                    </td>
+                    <td style={{ padding: 12 }}>
+                      <button
+                        onClick={() => editUser(u)}
+                        style={{
+                          marginRight: 6, padding: "4px 10px", fontSize: 12,
+                          background: "#2563eb", color: "white", border: "none",
+                          borderRadius: 4, cursor: "pointer",
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteUser(u)}
+                        style={{
+                          padding: "4px 10px", fontSize: 12,
+                          background: "#dc2626", color: "white", border: "none",
+                          borderRadius: 4, cursor: "pointer",
+                        }}
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1319,13 +1402,45 @@ export default function AdminApp() {
           >
             Manager
           </th>
+          <th
+            style={{
+              padding: 12,
+              textAlign: "left",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            Actions
+          </th>
         </tr>
       </thead>
       <tbody>
         {teams.map((t, i) => (
-          <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
+          <tr key={t.id || i} style={{ borderBottom: "1px solid #e5e7eb" }}>
             <td style={{ padding: 12 }}>{t.name}</td>
             <td style={{ padding: 12 }}>{t.manager?.full_name || "—"}</td>
+            <td style={{ padding: 12 }}>
+              <button
+                onClick={() => editTeam(t)}
+                style={{
+                  marginRight: 6, padding: "4px 10px", fontSize: 12,
+                  background: "#2563eb", color: "white", border: "none",
+                  borderRadius: 4, cursor: "pointer",
+                }}
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => deleteTeam(t)}
+                style={{
+                  padding: "4px 10px", fontSize: 12,
+                  background: "#dc2626", color: "white", border: "none",
+                  borderRadius: 4, cursor: "pointer",
+                }}
+              >
+                Delete
+              </button>
+            </td>
           </tr>
         ))}
       </tbody>

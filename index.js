@@ -365,6 +365,28 @@ app.post("/api/users", auth.requireAuth(["admin"]), async (req, res) => {
   }
 });
 
+app.put("/api/users/:id", auth.requireAuth(["admin"]), async (req, res) => {
+  try {
+    const user = await auth.updateUser(req.params.id, req.body);
+    res.json(user);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/users/:id", auth.requireAuth(["admin"]), async (req, res) => {
+  try {
+    // Prevent self-deletion
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: "You cannot delete your own account." });
+    }
+    const result = await auth.deleteUser(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get("/api/teams", auth.requireAuth(["admin", "manager"]), async (req, res) => {
   try {
     const teams = await auth.getTeams();
@@ -379,6 +401,24 @@ app.post("/api/teams", auth.requireAuth(["admin"]), async (req, res) => {
     const { name, manager_id } = req.body;
     const team = await auth.createTeam(name, manager_id || null);
     res.json(team);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put("/api/teams/:id", auth.requireAuth(["admin"]), async (req, res) => {
+  try {
+    const team = await auth.updateTeam(req.params.id, req.body);
+    res.json(team);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/teams/:id", auth.requireAuth(["admin"]), async (req, res) => {
+  try {
+    const result = await auth.deleteTeam(req.params.id);
+    res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

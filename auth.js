@@ -218,6 +218,100 @@ async function createTeam(name, managerId = null) {
   }
 }
 
+// ─── Update user ──────────────────────────────────────────────────────────────
+async function updateUser(id, fields) {
+  try {
+    const allowed = {};
+    if (fields.full_name !== undefined) allowed.full_name = fields.full_name;
+    if (fields.role !== undefined) allowed.role = fields.role;
+    if (fields.team_id !== undefined) allowed.team_id = fields.team_id || null;
+    if (fields.whatsapp_phone !== undefined) allowed.whatsapp_phone = fields.whatsapp_phone || null;
+    if (fields.is_active !== undefined) allowed.is_active = fields.is_active;
+    if (fields.username !== undefined) allowed.username = fields.username;
+    // Optional password change
+    if (fields.password) allowed.password_hash = await bcrypt.hash(fields.password, 10);
+
+    const { data, error } = await supabase
+      .from("users").update(allowed).eq("id", id)
+      .select("id, username, full_name, role, team_id, is_active, whatsapp_phone").single();
+    if (error) throw new Error(error.message);
+    return data;
+  } catch (err) {
+    console.error("Update user error:", err.message);
+    throw err;
+  }
+}
+
+// ─── Delete user (auto-unassign their leads back to pool) ──────────────────────
+async function deleteUser(id) {
+  try {
+    // Guard: don't allow deleting the last active admin
+    const { data: target } = await supabase.from("users").select("role").eq("id", id).single();
+    if (target?.role === "admin") {
+      const { data: admins } = await supabase
+        .from("users").select("id").eq("role", "admin").eq("is_active", true);
+      if ((admins || []).length <= 1) {
+        throw new Error("Cannot delete the last admin account.");
+      }
+    }
+
+    // Auto-unassign: any clients assigned to this user go back to the pool
+    await supabase
+      .from("clients")
+      .update({ assigned_to: null, is_locked: false })
+      .eq("assigned_to", id);
+
+    // If this user is a team manager, null out that reference
+    await supabase.from("teams").update({ manager_id: null }).eq("manager_id", id);
+
+    const { error } = await supabase.from("users").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  } catch (err) {
+    console.error("Delete user error:", err.message);
+    throw err;
+  }
+}
+
+// ─── Update team ──────────────────────────────────────────────────────────────
+async function updateTeam(id, fields) {
+  try {
+    const allowed = {};
+    if (fields.name !== undefined) allowed.name = fields.name;
+    if (fields.manager_id !== undefined) allowed.manager_id = fields.manager_id || null;
+
+    const { data, error } = await supabase
+      .from("teams").update(allowed).eq("id", id).select().single();
+    if (error) throw new Error(error.message);
+
+    // Keep the manager's team_id in sync
+    if (fields.manager_id) {
+      await supabase.from("users").update({ team_id: id }).eq("id", fields.manager_id);
+    }
+    return data;
+  } catch (err) {
+    console.error("Update team error:", err.message);
+    throw err;
+  }
+}
+
+// ─── Delete team (detach members + clients first) ─────────────────────────────
+async function deleteTeam(id) {
+  try {
+    // Detach members from the team (don't delete the people)
+    await supabase.from("users").update({ team_id: null }).eq("team_id", id);
+    // Detach any clients routed to this team
+    await supabase.from("clients").update({ team_id: null }).eq("team_id", id);
+
+    const { error } = await supabase.from("teams").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  } catch (err) {
+    console.error("Delete team error:", err.message);
+    throw err;
+  }
+}
+
 module.exports = { 
   login, 
   getMe,
@@ -225,5 +319,9 @@ module.exports = {
   createUser, 
   getUsers, 
   getTeams, 
-  createTeam 
+  createTeam,
+  updateUser,
+  deleteUser,
+  updateTeam,
+  deleteTeam
 };
