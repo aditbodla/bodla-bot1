@@ -146,7 +146,10 @@ DO NOT escalate for:
 - "Tell me more" requests
 
 When escalating, respond warmly: "Zaroor! Hamara sales team aap se jald contact karega. Jazakallah! 🙏"
-Then on a NEW LINE write exactly: [ESCALATE]
+Then on a NEW LINE write exactly ONE of these tags depending on the client's interest:
+- [ESCALATE:PLOT] — for plot buying/selling, plot rates, plot files, sectors, plot investment (Plot Trading team)
+- [ESCALATE:PROJECT] — for projects, apartments, shops, bookings, installment plans (Project Sales team)
+If unsure, use [ESCALATE:PLOT].
 
 YOUR STYLE:
 - Warm, professional, conversational
@@ -161,13 +164,26 @@ ${handoffNote}
 Remember: You have LIVE company data above. Use it to answer accurately. If client asks about something not in the data, acknowledge it professionally.`;
 }
 
-// ─── CHECK IF SHOULD ESCALATE ────────────────────────────────────────
+// ─── CHECK IF SHOULD ESCALATE (+ which department) ────────────────────
+// Returns null if no escalation, else 'PLOT' or 'PROJECT'.
+function getEscalation(aiReply) {
+  const m = aiReply.match(/\[ESCALATE(?::(PLOT|PROJECT))?\]/i);
+  if (!m) return null;
+  if (m[1]) return m[1].toUpperCase();
+  // Plain [ESCALATE] with no dept → infer from content, default PLOT.
+  const text = aiReply.toLowerCase();
+  if (text.includes("project") || text.includes("apartment") || text.includes("booking") || text.includes("installment")) {
+    return "PROJECT";
+  }
+  return "PLOT";
+}
+
 function shouldEscalate(aiReply) {
-  return aiReply.includes("[ESCALATE]");
+  return getEscalation(aiReply) !== null;
 }
 
 function cleanReply(text) {
-  return text.replace("[ESCALATE]", "").trim();
+  return text.replace(/\[ESCALATE(?::(?:PLOT|PROJECT))?\]/gi, "").trim();
 }
 
 // ─── SEND MESSAGE TO SALES AGENT ─────────────────────────────────────
@@ -273,25 +289,40 @@ console.log("🔔 WEBHOOK RECEIVED:", req.body.From, req.body.Body);
     });
 
     const rawReply = completion.choices[0].message.content;
-    const escalate = shouldEscalate(rawReply);
+    const department = getEscalation(rawReply); // null | 'PLOT' | 'PROJECT'
+    const escalate = department !== null;
     const botReply = cleanReply(rawReply);
 
     // 7. Save bot reply
     await db.saveMessage(clientPhone, "assistant", botReply);
 
-    // 8. If escalate AND not already escalated, notify agent once
+    // 8. On a fresh escalation, route to the right team + auto-assign an agent
     if (escalate && !client.escalated) {
       try {
-        const fullHistory = await db.getChatHistory(clientPhone);
-        await notifyAgent(clientPhone, client.name, fullHistory);
-        await db.markEscalated(clientPhone, true);
-        console.log("✅ Agent notified (first time):", clientPhone);
-      } catch (agentErr) {
-        console.error("Agent notification failed:", agentErr.message);
+        const result = await assignments.autoAssignOnEscalation(
+          clientPhone,
+          client.name,
+          department
+        );
+        if (result.assigned) {
+          console.log(`✅ Auto-assigned ${clientPhone} → ${result.agent.full_name} (${department})`);
+        } else if (result.alreadyAssigned) {
+          console.log(`ℹ️ ${clientPhone} already locked to an agent; stamps updated`);
+        } else {
+          console.log(`⚠️ No free agent in ${department} team — ${clientPhone} left in pool`);
+          // Fall back to the old single-number notify so a human still sees it
+          try {
+            const fullHistory = await db.getChatHistory(clientPhone);
+            await notifyAgent(clientPhone, client.name, fullHistory);
+          } catch (e) { console.error("Fallback notify failed:", e.message); }
+        }
+      } catch (assignErr) {
+        console.error("Auto-assign failed:", assignErr.message);
+        // Ensure the lead is at least marked escalated so it isn't lost
         await db.markEscalated(clientPhone, true);
       }
     } else if (escalate && client.escalated) {
-      console.log("ℹ️ Already escalated — AI handled NEW intent, agent not re-notified:", clientPhone);
+      console.log("ℹ️ Already escalated — AI handled NEW intent, not re-routed:", clientPhone);
     }
 
     // 9. Reply to client

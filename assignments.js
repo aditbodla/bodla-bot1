@@ -219,6 +219,138 @@ async function updateSetting(key, value, userId) {
     .upsert({ key, value, updated_by: userId, updated_at: new Date().toISOString() });
 }
 
+// ─── DROP B: INTENT ROUTING + AUTO-ASSIGNMENT ─────────────────────────────────
+
+// Map a department code to a team id (PLOT → "Plot Trading", PROJECT → "Project Sales")
+async function getTeamIdByDepartment(department) {
+  const teamName = department === "PROJECT" ? "Project Sales" : "Plot Trading";
+  const { data } = await supabase.from("teams").select("id").eq("name", teamName).single();
+  return data?.id || null;
+}
+
+// Write a notification row (channel-agnostic: dashboard now, mobile/WhatsApp later)
+async function createNotification(recipientId, type, clientPhone, title, body) {
+  if (!recipientId) return;
+  try {
+    await supabase.from("notifications").insert({
+      recipient_id: recipientId,
+      type,
+      client_phone: clientPhone,
+      title,
+      body,
+    });
+  } catch (err) {
+    console.error("createNotification error:", err.message);
+  }
+}
+
+// Pick an agent within a team using the configured strategy.
+// round_robin = the active agent who was least-recently assigned a lead.
+async function pickAgentForTeam(teamId) {
+  if (!teamId) return null;
+
+  const { data: agents } = await supabase
+    .from("users")
+    .select("id, full_name, team_id, is_active, role")
+    .eq("team_id", teamId)
+    .eq("role", "agent")
+    .eq("is_active", true);
+
+  if (!agents || agents.length === 0) return null;
+  if (agents.length === 1) return agents[0];
+
+  const strategy = (await getSetting("assignment_strategy")) || "round_robin";
+
+  if (strategy === "round_robin") {
+    // Count current open assignments per agent; pick the least-loaded.
+    const counts = {};
+    for (const a of agents) counts[a.id] = 0;
+    const { data: openClients } = await supabase
+      .from("clients")
+      .select("assigned_to")
+      .in("assigned_to", agents.map((a) => a.id));
+    for (const c of openClients || []) {
+      if (counts[c.assigned_to] !== undefined) counts[c.assigned_to]++;
+    }
+    agents.sort((a, b) => counts[a.id] - counts[b.id]);
+    return agents[0];
+  }
+
+  // Fallback: random
+  return agents[Math.floor(Math.random() * agents.length)];
+}
+
+// Main entry: route an escalated client to the right team + agent.
+// Returns { assigned: bool, agent, teamId, department }.
+async function autoAssignOnEscalation(clientPhone, clientName, department) {
+  const teamId = await getTeamIdByDepartment(department);
+
+  // Always stamp department + team + escalated_at, even if no agent is free.
+  const baseUpdate = {
+    department,
+    team_id: teamId,
+    escalated: true,
+    escalated_at: new Date().toISOString(),
+  };
+
+  // If already locked to an agent, don't reassign — just ensure stamps exist.
+  const { data: existing } = await supabase
+    .from("clients")
+    .select("assigned_to, is_locked")
+    .eq("phone", clientPhone)
+    .single();
+
+  if (existing?.is_locked && existing?.assigned_to) {
+    await supabase.from("clients").update(baseUpdate).eq("phone", clientPhone);
+    return { assigned: false, alreadyAssigned: true, teamId, department };
+  }
+
+  const agent = await pickAgentForTeam(teamId);
+
+  if (!agent) {
+    // No agent available — leave in pool, stamps set so SLA scanner can chase a manager.
+    await supabase.from("clients").update(baseUpdate).eq("phone", clientPhone);
+    return { assigned: false, agent: null, teamId, department };
+  }
+
+  // Assign + lock + stamp assignment time
+  await supabase
+    .from("clients")
+    .update({
+      ...baseUpdate,
+      assigned_to: agent.id,
+      is_locked: true,
+      agent_assigned_at: new Date().toISOString(),
+    })
+    .eq("phone", clientPhone);
+
+  // Dashboard notification for the agent
+  await createNotification(
+    agent.id,
+    "NEW_LEAD",
+    clientPhone,
+    "New lead assigned",
+    `${clientName || clientPhone} needs follow-up (${department === "PROJECT" ? "Project Sales" : "Plot Trading"}).`
+  );
+
+  // WhatsApp the agent if they have a number
+  try {
+    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const agentPhone = await getAgentPhone(agent.id);
+    if (agentPhone) {
+      await twilioClient.messages.create({
+        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+        to: `whatsapp:${agentPhone}`,
+        body: `🔔 *New Lead Assigned*\n\nClient: ${clientName || clientPhone}\nPhone: ${clientPhone}\nDept: ${department === "PROJECT" ? "Project Sales" : "Plot Trading"}\n\nPlease follow up. Open your dashboard for the full chat.`,
+      });
+    }
+  } catch (err) {
+    console.error("Agent WhatsApp notify failed:", err.message);
+  }
+
+  return { assigned: true, agent, teamId, department };
+}
+
 module.exports = {
   getLeads,
   assignClient,
@@ -228,4 +360,8 @@ module.exports = {
   getBrochures,
   getSetting,
   updateSetting,
+  getTeamIdByDepartment,
+  createNotification,
+  pickAgentForTeam,
+  autoAssignOnEscalation,
 };
