@@ -51,6 +51,21 @@ export default function AdminApp() {
     username: "", password: "", full_name: "", role: "agent", team_id: "", whatsapp_phone: "",
   });
 
+  // Role-based page guard: if on a page this role can't see, snap to dashboard.
+  useEffect(() => {
+    if (!auth?.user?.role) return;
+    const pagePerms = {
+      users: ["admin", "manager"],
+      teams: ["admin", "manager"],
+      rates: ["admin", "manager"],
+      projects: ["admin", "manager"],
+      company: ["admin"],
+    };
+    if (pagePerms[page] && !pagePerms[page].includes(auth.user.role)) {
+      setPage("dashboard");
+    }
+  }, [page, auth?.user?.role]);
+
   const getHeaders = () => ({ Authorization: `Bearer ${auth?.token}` });
 
   // Restore auth on app load
@@ -402,9 +417,13 @@ export default function AdminApp() {
     if (role === null) return;
     const whatsapp_phone = window.prompt("WhatsApp phone (e.g. +9230...):", u.whatsapp_phone || "");
     if (whatsapp_phone === null) return;
+    const newPassword = window.prompt("New password (leave blank to keep current):", "");
+    if (newPassword === null) return;
+    const payload = { full_name, role, whatsapp_phone };
+    if (newPassword.trim()) payload.password = newPassword.trim();
     try {
-      await axios.put(`${API}/api/users/${u.id}`, { full_name, role, whatsapp_phone }, { headers: getHeaders() });
-      setMsg("User updated");
+      await axios.put(`${API}/api/users/${u.id}`, payload, { headers: getHeaders() });
+      setMsg(newPassword.trim() ? "User updated (password changed)" : "User updated");
       loadUsers();
     } catch (e) {
       setMsg("Error: " + (e.response?.data?.error || e.message));
@@ -615,15 +634,17 @@ export default function AdminApp() {
       >
         <h2 style={{ fontSize: 14, marginBottom: 20 }}>BODLA BOT</h2>
         {[
-          { id: "dashboard", label: "Dashboard" },
-          { id: "chats", label: "Chats" },
-          { id: "leads", label: "Leads" },
-          { id: "users", label: "Users" },
-          { id: "teams", label: "Teams" },
-          { id: "rates", label: "Plot Rates" },
-          { id: "projects", label: "Projects" },
-          { id: "company", label: "Company Info" },
-        ].map((item) => (
+          { id: "dashboard", label: "Dashboard", roles: ["admin", "manager", "agent"] },
+          { id: "chats", label: "Chats", roles: ["admin", "manager", "agent"] },
+          { id: "leads", label: "Leads", roles: ["admin", "manager", "agent"] },
+          { id: "users", label: "Users", roles: ["admin", "manager"] },
+          { id: "teams", label: "Teams", roles: ["admin", "manager"] },
+          { id: "rates", label: "Plot Rates", roles: ["admin", "manager"] },
+          { id: "projects", label: "Projects", roles: ["admin", "manager"] },
+          { id: "company", label: "Company Info", roles: ["admin"] },
+        ]
+          .filter((item) => item.roles.includes(auth?.user?.role))
+          .map((item) => (
           <div
             key={item.id}
             onClick={() => {
@@ -1164,7 +1185,7 @@ export default function AdminApp() {
                 <input placeholder="Username" value={newUser.username}
                   onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
                   style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }} />
-                <input placeholder="Password" type="text" value={newUser.password}
+                <input placeholder="Password" type="password" value={newUser.password}
                   onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                   style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }} />
                 <select value={newUser.role}
@@ -1255,6 +1276,16 @@ export default function AdminApp() {
                       fontWeight: 600,
                     }}
                   >
+                    Team
+                  </th>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Status
                   </th>
                   <th
@@ -1304,6 +1335,9 @@ export default function AdminApp() {
                       >
                         {u.role}
                       </span>
+                    </td>
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {u.team?.name || "—"}
                     </td>
                     <td style={{ padding: 12 }}>
                       {u.is_active ? "Active" : "Inactive"}

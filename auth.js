@@ -161,7 +161,7 @@ async function getUsers(role = null, teamId = null) {
   try {
     let query = supabase
       .from("users")
-      .select("id, username, full_name, role, team_id, is_active, last_login, created_at, whatsapp_phone");
+      .select("id, username, full_name, role, team_id, is_active, last_login, created_at, whatsapp_phone, team:team_id(id, name)");
     
     if (role) query = query.eq("role", role);
     if (teamId) query = query.eq("team_id", teamId);
