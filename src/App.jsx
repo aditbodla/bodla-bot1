@@ -907,6 +907,7 @@ export default function AdminApp() {
 
         {page === "leads" && (
   <div>
+    {(auth?.user?.role === "admin" || auth?.user?.role === "manager") && (
     <div
       style={{
         background: "white",
@@ -1006,6 +1007,7 @@ export default function AdminApp() {
         </span>
       )}
     </div>
+    )}
 
     <div
       style={{

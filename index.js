@@ -5,6 +5,8 @@ const { MessagingResponse } = require("twilio").twiml;
 const twilio = require("twilio");
 const OpenAI = require("openai");
 const db = require("./database");
+const auth = require("./auth");
+const assignments = require("./assignments");
 const fs = require("fs");
 
 const app = express();
@@ -339,9 +341,9 @@ console.log("🔔 WEBHOOK RECEIVED:", req.body.From, req.body.Body);
 
 // ─── DASHBOARD (React SPA is served as static files at the bottom) ─────
 
-app.get("/api/clients", async (req, res) => {
+app.get("/api/clients", auth.requireAuth(["admin", "manager", "agent"]), async (req, res) => {
   try {
-    const clients = await db.getAllClients();
+    const clients = await db.getAllClients(req.user);
     const data = await Promise.all(
       clients.map(async (c) => ({
         ...c,
@@ -358,8 +360,6 @@ app.get("/api/clients", async (req, res) => {
 app.get("/health", (req, res) => res.send("Bodla Bot running."));
 
 // ─── AUTH & ADMIN ─────────────────────────────────────────────────────
-const auth = require("./auth");
-const assignments = require("./assignments");
 
 app.post("/api/login", async (req, res) => {
   try {

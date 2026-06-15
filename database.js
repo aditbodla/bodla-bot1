@@ -45,11 +45,22 @@ async function markEscalated(phone, agentRequested = false) {
     .eq("phone", phone);
 }
 
-async function getAllClients() {
-  const { data } = await supabase
+async function getAllClients(user = null) {
+  let query = supabase
     .from("clients")
     .select("*")
     .order("last_seen", { ascending: false });
+
+  // Scope by role: agents see only their own, managers see their team, admins see all.
+  if (user) {
+    if (user.role === "agent") {
+      query = query.eq("assigned_to", user.id);
+    } else if (user.role === "manager") {
+      query = query.eq("team_id", user.team_id);
+    }
+  }
+
+  const { data } = await query;
   return data || [];
 }
 
