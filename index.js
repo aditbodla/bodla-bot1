@@ -359,6 +359,34 @@ app.get("/api/clients", auth.requireAuth(["admin", "manager", "agent"]), async (
 
 app.get("/health", (req, res) => res.send("Bodla Bot running."));
 
+// ─── DROP C: SLA CRON ENDPOINT ────────────────────────────────────────
+// Hit this every minute from an external scheduler (e.g. cron-job.org).
+// Protected by a secret token so randoms can't trigger it.
+app.all("/cron/check-sla", async (req, res) => {
+  const token = req.query.token || req.headers["x-cron-token"];
+  if (token !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    const result = await assignments.checkSLA();
+    console.log("⏱️ SLA scan:", JSON.stringify(result));
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("SLA scan error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Mark a client's chat as seen (stops the SLA clock). Called when an agent opens the chat.
+app.post("/api/leads/:phone/seen", auth.requireAuth(["admin", "manager", "agent"]), async (req, res) => {
+  try {
+    await assignments.markClientSeen(req.params.phone);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ─── AUTH & ADMIN ─────────────────────────────────────────────────────
 
 app.post("/api/login", async (req, res) => {
@@ -504,6 +532,8 @@ app.post("/api/agent/reply", auth.requireAuth(["admin", "manager", "agent"]), as
       full_name: req.user.full_name,
       role: req.user.role,
     });
+    // Replying counts as seeing — stop the SLA clock.
+    await assignments.markClientSeen(phone);
     res.json({ success: true, sid: result.sid });
   } catch (err) {
     console.error("Agent reply error:", err.message);

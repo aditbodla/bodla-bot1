@@ -246,6 +246,12 @@ export default function AdminApp() {
   const selectClient = async (client) => {
     setSelectedClient(client);
     setChatMessages(client.messages || []);
+    // Stop the SLA clock — agent has opened/seen this chat.
+    try {
+      await axios.post(`${API}/api/leads/${encodeURIComponent(client.phone)}/seen`, {}, { headers: getHeaders() });
+    } catch (e) {
+      // non-critical
+    }
   };
 
   const sendReply = async () => {

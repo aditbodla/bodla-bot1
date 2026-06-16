@@ -351,6 +351,107 @@ async function autoAssignOnEscalation(clientPhone, clientName, department) {
   return { assigned: true, agent, teamId, department };
 }
 
+// ─── DROP C: SLA SCANNER ──────────────────────────────────────────────────────
+
+// Mark a client's chat as "seen" by the agent — stops the SLA clock.
+async function markClientSeen(clientPhone) {
+  await supabase
+    .from("clients")
+    .update({ agent_seen_at: new Date().toISOString() })
+    .eq("phone", clientPhone)
+    .is("agent_seen_at", null); // only set the first time
+}
+
+// Find the manager for a given team (falls back to any admin).
+async function getEscalationManager(teamId) {
+  if (teamId) {
+    const { data: team } = await supabase
+      .from("teams").select("manager_id").eq("id", teamId).single();
+    if (team?.manager_id) return team.manager_id;
+  }
+  // Fallback: first active admin
+  const { data: admin } = await supabase
+    .from("users").select("id").eq("role", "admin").eq("is_active", true).limit(1).single();
+  return admin?.id || null;
+}
+
+// Twilio helper
+function twilioClient() {
+  return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+}
+
+async function whatsappTo(userId, body) {
+  try {
+    const phone = await getAgentPhone(userId);
+    if (!phone) return;
+    await twilioClient().messages.create({
+      from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+      to: `whatsapp:${phone}`,
+      body,
+    });
+  } catch (err) {
+    console.error("whatsappTo error:", err.message);
+  }
+}
+
+// The scanner: called by an external cron every minute.
+async function checkSLA() {
+  const reminderMin = parseInt((await getSetting("sla_agent_reminder_minutes")) || "10", 10);
+  const managerMin = parseInt((await getSetting("sla_manager_escalate_minutes")) || "30", 10);
+  const now = Date.now();
+
+  // Candidates: escalated, assigned to an agent, not yet seen.
+  const { data: leads } = await supabase
+    .from("clients")
+    .select("phone, name, assigned_to, team_id, agent_assigned_at, agent_seen_at, agent_reminded_at, manager_notified_at")
+    .eq("escalated", true)
+    .not("assigned_to", "is", null)
+    .is("agent_seen_at", null);
+
+  const result = { reminded: 0, escalatedToManager: 0, scanned: (leads || []).length };
+
+  for (const lead of leads || []) {
+    if (!lead.agent_assigned_at) continue;
+    const ageMin = (now - new Date(lead.agent_assigned_at).getTime()) / 60000;
+
+    // Stage 2: manager escalation
+    if (ageMin >= managerMin && !lead.manager_notified_at) {
+      const managerId = await getEscalationManager(lead.team_id);
+      if (managerId) {
+        await createNotification(
+          managerId, "SLA_MANAGER_ESCALATION", lead.phone,
+          "Agent hasn't responded",
+          `${lead.name || lead.phone} has waited ${Math.round(ageMin)} min with no agent response. Please intervene.`
+        );
+        await whatsappTo(managerId,
+          `⚠️ *SLA ALERT*\n\nClient ${lead.name || lead.phone} has waited ${Math.round(ageMin)} min and the assigned agent hasn't responded.\n\nPlease check the dashboard.`);
+      }
+      await supabase.from("clients")
+        .update({ manager_notified_at: new Date().toISOString() })
+        .eq("phone", lead.phone);
+      result.escalatedToManager++;
+      continue;
+    }
+
+    // Stage 1: agent reminder
+    if (ageMin >= reminderMin && !lead.agent_reminded_at) {
+      await createNotification(
+        lead.assigned_to, "SLA_AGENT_REMINDER", lead.phone,
+        "Reminder: lead waiting",
+        `${lead.name || lead.phone} has been waiting ${Math.round(ageMin)} min. Please respond.`
+      );
+      await whatsappTo(lead.assigned_to,
+        `⏰ *Reminder*\n\nClient ${lead.name || lead.phone} is waiting for your response (${Math.round(ageMin)} min). Please reply soon.`);
+      await supabase.from("clients")
+        .update({ agent_reminded_at: new Date().toISOString() })
+        .eq("phone", lead.phone);
+      result.reminded++;
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   getLeads,
   assignClient,
@@ -364,4 +465,6 @@ module.exports = {
   createNotification,
   pickAgentForTeam,
   autoAssignOnEscalation,
+  markClientSeen,
+  checkSLA,
 };
